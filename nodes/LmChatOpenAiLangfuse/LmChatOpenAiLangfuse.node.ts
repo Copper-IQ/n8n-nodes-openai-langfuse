@@ -695,31 +695,25 @@ export class LmChatOpenAiLangfuse implements INodeType {
             modelKwargs: fields.modelKwargs,
         }, null, 2));
 
-		const model = new ChatOpenAI(fields);
+		let model = new ChatOpenAI(fields);
 
-		// Pass built-in tools in metadata for ToolAgent to configure
+		// Bind built-in tools if Responses API is enabled
 		if (responsesApiEnabled) {
 			console.log('[DEBUG] Formatting built-in tools...');
 			const tools = formatBuiltInTools(
 				this.getNodeParameter('builtInTools', itemIndex, {}) as IDataObject,
 			);
 			console.log('[DEBUG] Formatted tools:', JSON.stringify(tools, null, 2));
-			// pass tools to the model metadata, ToolAgent will use it to create agent configuration
 			if (tools.length) {
-				console.log('[DEBUG] Setting', tools.length, 'tools in model.metadata');
-				model.metadata = {
-					...model.metadata,
-					tools,
-				};
-				console.log('[DEBUG] Model metadata now includes tools');
-				console.log('[DEBUG] Final model.metadata:', JSON.stringify(model.metadata, null, 2));
+				console.log('[DEBUG] Binding', tools.length, 'tools using bindTools()');
+				model = model.bindTools(tools) as ChatOpenAI;
+				console.log('[DEBUG] Tools successfully bound to model');
 			} else {
-				console.log('[DEBUG] No tools to add (tools array is empty)');
+				console.log('[DEBUG] No tools to bind (tools array is empty)');
 			}
 		} else {
 			console.log('[DEBUG] Responses API disabled, skipping tools');
 		}
-
 		console.log('[DEBUG] FINAL CHECK - model.metadata.tools:', JSON.stringify(model.metadata?.tools, null, 2));
 
         return {
