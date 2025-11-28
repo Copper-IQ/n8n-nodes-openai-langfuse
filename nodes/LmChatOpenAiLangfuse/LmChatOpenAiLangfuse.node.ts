@@ -668,23 +668,6 @@ export class LmChatOpenAiLangfuse implements INodeType {
             'baseURL',
         ]);
 
-        // Prepare metadata with tools BEFORE creating the model
-        const metadata = { ...customMetadata };
-        
-        if (responsesApiEnabled) {
-            console.log('[DEBUG] Formatting built-in tools...');
-            const tools = formatBuiltInTools(
-                this.getNodeParameter('builtInTools', itemIndex, {}) as IDataObject,
-            );
-            console.log('[DEBUG] Formatted tools:', JSON.stringify(tools, null, 2));
-            if (tools.length) {
-                console.log('[DEBUG] Adding', tools.length, 'tools to metadata BEFORE model creation');
-                metadata.tools = tools;
-            } else {
-                console.log('[DEBUG] No tools to add (tools array is empty)');
-            }
-        }
-
         const fields = {
             apiKey: credentials.apiKey as string,
             model: modelName,
@@ -693,7 +676,7 @@ export class LmChatOpenAiLangfuse implements INodeType {
             maxRetries: options.maxRetries ?? 2,
             configuration,
             callbacks: [lfHandler, new N8nLlmTracing(this)],
-            metadata,
+            metadata: customMetadata,
             modelKwargs,
         } as any;
 
@@ -711,7 +694,23 @@ export class LmChatOpenAiLangfuse implements INodeType {
             modelKwargs: fields.modelKwargs,
         }, null, 2));
 
-        const model = new ChatOpenAI(fields);
+        let model = new ChatOpenAI(fields);
+
+        // Bind built-in tools if Responses API is enabled
+        if (responsesApiEnabled) {
+            console.log('[DEBUG] Formatting built-in tools...');
+            const tools = formatBuiltInTools(
+                this.getNodeParameter('builtInTools', itemIndex, {}) as IDataObject,
+            );
+            console.log('[DEBUG] Formatted tools:', JSON.stringify(tools, null, 2));
+            if (tools.length) {
+                console.log('[DEBUG] Binding', tools.length, 'tools to model using bindTools()');
+                model = model.bindTools(tools) as ChatOpenAI;
+                console.log('[DEBUG] Model successfully bound with tools');
+            } else {
+                console.log('[DEBUG] No tools to bind (tools array is empty)');
+            }
+        }
 
         return {
             response: model,
