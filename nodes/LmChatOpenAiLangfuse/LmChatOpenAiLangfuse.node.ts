@@ -712,10 +712,15 @@ export class LmChatOpenAiLangfuse implements INodeType {
 					tools,
 				};
 				console.log('[DEBUG] Model metadata now includes tools');
+				console.log('[DEBUG] Final model.metadata:', JSON.stringify(model.metadata, null, 2));
 			} else {
 				console.log('[DEBUG] No tools to add (tools array is empty)');
 			}
+		} else {
+			console.log('[DEBUG] Responses API disabled, skipping tools');
 		}
+
+		console.log('[DEBUG] FINAL CHECK - model.metadata.tools:', JSON.stringify(model.metadata?.tools, null, 2));
 
         return {
             response: model,
