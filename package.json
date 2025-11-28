@@ -1,7 +1,7 @@
 {
   "name": "n8n-nodes-openai-langfuse",
-  "version": "0.1.11",
-  "description": "n8n community node: Langfuse + OpenAI-compatible LLM provider",
+  "version": "0.2.0",
+  "description": "n8n community node: Langfuse + OpenAI-compatible LLM provider with Responses API support",
   "keywords": [
     "n8n-community-node-package",
     "langfuse",
@@ -46,12 +46,14 @@
     "@langchain/core": "^0.3.72",
     "@langchain/openai": "^0.6.9",
     "langfuse-langchain": "^3.0.0",
+    "lodash": "^4.17.21",
     "openai": "^5.19.1",
     "proxy-from-env": "^1.1.0",
     "undici": "^7.15.0"
   },
   "devDependencies": {
     "@types/json-schema": "^7.0.15",
+    "@types/lodash": "^4.17.21",
     "@types/proxy-from-env": "^1.0.4",
     "@typescript-eslint/parser": "~8.32.0",
     "eslint": "^8.57.0",
@@ -59,6 +61,7 @@
     "gulp": "^5.0.1",
     "gulp-cli": "^3.1.0",
     "prettier": "^3.5.3",
+    "rimraf": "^6.1.2",
     "typescript": "^5.8.2"
   },
   "peerDependencies": {

@@ -1,13 +1,17 @@
 import { ChatOpenAI, type ClientOptions } from '@langchain/openai';
+import pick from 'lodash/pick';
 import {
     jsonParse,
+    type IDataObject,
     type INodeType,
     type INodeTypeDescription,
     type ISupplyDataFunctions,
     type SupplyData,
 } from 'n8n-workflow';
 
+import { formatBuiltInTools, prepareAdditionalResponsesParams } from './common';
 import { searchModels } from './methods/loadModels';
+import type { ModelOptions } from './types';
 import { N8nLlmTracing } from './utils/N8nLlmTracing';
 import { LangfuseCallbackHandlerWrapper } from './utils/LangfuseCallbackHandlerWrapper';
 
@@ -225,6 +229,122 @@ export class LmChatOpenAiLangfuse implements INodeType {
                 },
             },
             {
+                displayName: 'Use Responses API',
+                name: 'responsesApiEnabled',
+                type: 'boolean',
+                default: true,
+                description:
+                    'Whether to use the Responses API to generate the response. <a href="https://docs.n8n.io/integrations/builtin/cluster-nodes/sub-nodes/n8n-nodes-langchain.lmchatopenai/#use-responses-api">Learn more</a>.',
+                displayOptions: {
+                    show: {
+                        '@version': [{ _cnd: { gte: 3 } }],
+                    },
+                },
+            },
+            {
+                displayName: 'Built-in Tools',
+                name: 'builtInTools',
+                placeholder: 'Add Built-in Tool',
+                type: 'collection',
+                default: {},
+                options: [
+                    {
+                        displayName: 'Web Search',
+                        name: 'webSearch',
+                        type: 'collection',
+                        default: { searchContextSize: 'medium' },
+                        options: [
+                            {
+                                displayName: 'City',
+                                name: 'city',
+                                type: 'string',
+                                default: '',
+                                placeholder: 'e.g. New York, London',
+                            },
+                            {
+                                displayName: 'Country',
+                                name: 'country',
+                                type: 'string',
+                                default: '',
+                                placeholder: 'e.g. US, GB',
+                            },
+                            {
+                                displayName: 'Region',
+                                name: 'region',
+                                type: 'string',
+                                default: '',
+                                placeholder: 'e.g. New York, London',
+                            },
+                            {
+                                displayName: 'Search Context Size',
+                                name: 'searchContextSize',
+                                type: 'options',
+                                default: 'medium',
+                                description:
+                                    'High level guidance for the amount of context window space to use for the search',
+                                options: [
+                                    { name: 'Low', value: 'low' },
+                                    { name: 'Medium', value: 'medium' },
+                                    { name: 'High', value: 'high' },
+                                ],
+                            },
+                            {
+                                displayName: 'Web Search Allowed Domains',
+                                name: 'allowedDomains',
+                                type: 'string',
+                                default: '',
+                                description:
+                                    'Comma-separated list of domains to search. Only domains in this list will be searched.',
+                                placeholder: 'e.g. google.com, wikipedia.org',
+                            },
+                        ],
+                    },
+                    {
+                        displayName: 'File Search',
+                        name: 'fileSearch',
+                        type: 'collection',
+                        default: { vectorStoreIds: '[]' },
+                        options: [
+                            {
+                                displayName: 'Vector Store IDs',
+                                name: 'vectorStoreIds',
+                                description:
+                                    'The vector store IDs to use for the file search. Vector stores are managed via OpenAI Dashboard. <a href="https://docs.n8n.io/integrations/builtin/cluster-nodes/sub-nodes/n8n-nodes-langchain.lmchatopenai/#built-in-tools">Learn more</a>.',
+                                type: 'json',
+                                default: '[]',
+
+                            },
+                            {
+                                displayName: 'Filters',
+                                name: 'filters',
+                                type: 'json',
+                                default: '{}',
+                            },
+                            {
+                                displayName: 'Max Results',
+                                name: 'maxResults',
+                                type: 'number',
+                                default: 1,
+                                typeOptions: { minValue: 1, maxValue: 50 },
+                            },
+                        ],
+                    },
+                    {
+                        displayName: 'Code Interpreter',
+                        name: 'codeInterpreter',
+                        type: 'boolean',
+                        default: true,
+                        description: 'Whether to allow the model to execute code in a sandboxed environment',
+                    },
+                ],
+                displayOptions: {
+                    show: {
+                        '@version': [{ _cnd: { gte: 3 } }],
+                        '/responsesApiEnabled': [true],
+                    },
+                },
+            },
+            {
                 displayName: 'Options',
                 name: 'options',
                 placeholder: 'Add Option',
@@ -241,6 +361,20 @@ export class LmChatOpenAiLangfuse implements INodeType {
                         displayOptions: {
                             hide: {
                                 '@version': [{ _cnd: { gte: 2 } }],
+                            },
+                        },
+                    },
+                    {
+                        displayName: 'Conversation ID',
+                        name: 'conversationId',
+                        default: '',
+                        description:
+                            'The conversation that this response belongs to. Input items and output items from this response are automatically added to this conversation after this response completes.',
+                        type: 'string',
+                        displayOptions: {
+                            show: {
+                                '@version': [{ _cnd: { gte: 3 } }],
+                                '/responsesApiEnabled': [true],
                             },
                         },
                     },
@@ -272,6 +406,20 @@ export class LmChatOpenAiLangfuse implements INodeType {
                         },
                     },
                     {
+                        displayName: 'Metadata',
+                        name: 'metadata',
+                        type: 'json',
+                        description:
+                            'Set of 16 key-value pairs that can be attached to an object. This can be useful for storing additional information about the object in a structured format, and querying for objects via API or the dashboard. Keys are strings with a maximum length of 64 characters. Values are strings with a maximum length of 512 characters.',
+                        default: '{}',
+                        displayOptions: {
+                            show: {
+                                '@version': [{ _cnd: { gte: 3 } }],
+                                '/responsesApiEnabled': [true],
+                            },
+                        },
+                    },
+                    {
                         displayName: 'Presence Penalty',
                         name: 'presencePenalty',
                         default: 0,
@@ -279,6 +427,20 @@ export class LmChatOpenAiLangfuse implements INodeType {
                         description:
                             "Positive values penalize new tokens based on whether they appear in the text so far, increasing the model's likelihood to talk about new topics",
                         type: 'number',
+                    },
+                    {
+                        displayName: 'Prompt Cache Key',
+                        name: 'promptCacheKey',
+                        type: 'string',
+                        default: '',
+                        description:
+                            'Used by OpenAI to cache responses for similar requests to optimize your cache hit rates',
+                        displayOptions: {
+                            show: {
+                                '@version': [{ _cnd: { gte: 3 } }],
+                                '/responsesApiEnabled': [true],
+                            },
+                        },
                     },
                     {
                         displayName: 'Reasoning Effort',
@@ -330,6 +492,25 @@ export class LmChatOpenAiLangfuse implements INodeType {
                                     'Enables JSON mode, which should guarantee the message the model generates is valid JSON',
                             },
                         ],
+                        displayOptions: {
+                            show: {
+                                '@version': [{ _cnd: { lte: 2 } }],
+                            },
+                        },
+                    },
+                    {
+                        displayName: 'Safety Identifier',
+                        name: 'safetyIdentifier',
+                        type: 'string',
+                        default: '',
+                        description:
+                            "A stable identifier used to help detect users of your application that may be violating OpenAI's usage policies. The IDs should be a string that uniquely identifies each user.",
+                        displayOptions: {
+                            show: {
+                                '@version': [{ _cnd: { gte: 3 } }],
+                                '/responsesApiEnabled': [true],
+                            },
+                        },
                     },
                     {
                         displayName: 'Sampling Temperature',
@@ -341,11 +522,48 @@ export class LmChatOpenAiLangfuse implements INodeType {
                         type: 'number',
                     },
                     {
+                        displayName: 'Service Tier',
+                        name: 'serviceTier',
+                        type: 'options',
+                        default: 'auto',
+                        description: 'The service tier to use for the request',
+                        options: [
+                            { name: 'Auto', value: 'auto' },
+                            { name: 'Flex', value: 'flex' },
+                            { name: 'Default', value: 'default' },
+                            { name: 'Priority', value: 'priority' },
+                        ],
+                        displayOptions: {
+                            show: {
+                                '@version': [{ _cnd: { gte: 3 } }],
+                                '/responsesApiEnabled': [true],
+                            },
+                        },
+                    },
+                    {
                         displayName: 'Timeout',
                         name: 'timeout',
                         default: 60000,
                         description: 'Maximum amount of time a request is allowed to take in milliseconds',
                         type: 'number',
+                    },
+                    {
+                        displayName: 'Top Logprobs',
+                        name: 'topLogprobs',
+                        type: 'number',
+                        default: 0,
+                        description:
+                            'An integer between 0 and 20 specifying the number of most likely tokens to return at each token position, each with an associated log probability',
+                        typeOptions: {
+                            minValue: 0,
+                            maxValue: 20,
+                        },
+                        displayOptions: {
+                            show: {
+                                '@version': [{ _cnd: { gte: 3 } }],
+                                '/responsesApiEnabled': [true],
+                            },
+                        },
                     },
                     {
                         displayName: 'Top P',
@@ -406,18 +624,9 @@ export class LmChatOpenAiLangfuse implements INodeType {
                 ? (this.getNodeParameter('model.value', itemIndex) as string)
                 : (this.getNodeParameter('model', itemIndex) as string);
 
-        const options = this.getNodeParameter('options', itemIndex, {}) as {
-            baseURL?: string;
-            frequencyPenalty?: number;
-            maxTokens?: number;
-            maxRetries: number;
-            timeout: number;
-            presencePenalty?: number;
-            temperature?: number;
-            topP?: number;
-            responseFormat?: 'text' | 'json_object';
-            reasoningEffort?: 'low' | 'medium' | 'high';
-        };
+        const responsesApiEnabled = this.getNodeParameter('responsesApiEnabled', itemIndex, false) as boolean;
+
+        const options = this.getNodeParameter('options', itemIndex, {}) as ModelOptions;
 
         const configuration: ClientOptions = {};
 
@@ -428,26 +637,54 @@ export class LmChatOpenAiLangfuse implements INodeType {
         }
 
         // Extra options to send to OpenAI, that are not directly supported by LangChain
-        const modelKwargs: {
-            response_format?: object;
-            reasoning_effort?: 'low' | 'medium' | 'high';
-        } = {};
-        if (options.responseFormat) modelKwargs.response_format = { type: options.responseFormat };
-        if (options.reasoningEffort && ['low', 'medium', 'high'].includes(options.reasoningEffort))
-            modelKwargs.reasoning_effort = options.reasoningEffort;
+        const modelKwargs: Record<string, unknown> = {};
+        if (responsesApiEnabled) {
+            const kwargs = prepareAdditionalResponsesParams(options);
+            Object.assign(modelKwargs, kwargs);
+        } else {
+            if (options.responseFormat) modelKwargs.response_format = { type: options.responseFormat };
+            if (options.reasoningEffort && ['low', 'medium', 'high'].includes(options.reasoningEffort))
+                modelKwargs.reasoning_effort = options.reasoningEffort;
+        }
 
-        const model = new ChatOpenAI({
-            callbacks: [lfHandler, new N8nLlmTracing(this)],
-            metadata: customMetadata,
+        const includedOptions = pick(options, [
+            'frequencyPenalty',
+            'maxTokens',
+            'presencePenalty',
+            'temperature',
+            'topP',
+            'baseURL',
+        ]);
+
+        const fields = {
             apiKey: credentials.apiKey as string,
-            configuration: { baseURL: configuration.baseURL },
-
             model: modelName,
-            ...options,
+            ...includedOptions,
             timeout: options.timeout ?? 60000,
             maxRetries: options.maxRetries ?? 2,
+            configuration,
+            callbacks: [lfHandler, new N8nLlmTracing(this)],
+            metadata: customMetadata,
             modelKwargs,
-        });
+        } as any;
+
+        if (responsesApiEnabled) {
+            fields.useResponsesApi = true;
+        }
+
+        const model = new ChatOpenAI(fields);
+
+        if (responsesApiEnabled) {
+            const tools = formatBuiltInTools(
+                this.getNodeParameter('builtInTools', itemIndex, {}) as IDataObject,
+            );
+            if (tools.length) {
+                model.metadata = {
+                    ...model.metadata,
+                    tools,
+                };
+            }
+        }
 
         return {
             response: model,
