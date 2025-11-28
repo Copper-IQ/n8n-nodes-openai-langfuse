@@ -619,14 +619,22 @@ export class LmChatOpenAiLangfuse implements INodeType {
         console.log('[Langfuse] CallbackHandler created with session:', sessionId, 'user:', userId, 'metadata:', customMetadata);
 
         const version = this.getNode().typeVersion;
+        console.log('[DEBUG] Node version:', version);
+        
         const modelName =
             version >= 3
                 ? (this.getNodeParameter('model.value', itemIndex) as string)
                 : (this.getNodeParameter('model', itemIndex) as string);
+        console.log('[DEBUG] Model name:', modelName);
 
         const responsesApiEnabled = this.getNodeParameter('responsesApiEnabled', itemIndex, false) as boolean;
+        console.log('[DEBUG] responsesApiEnabled:', responsesApiEnabled);
 
         const options = this.getNodeParameter('options', itemIndex, {}) as ModelOptions;
+        console.log('[DEBUG] Options:', JSON.stringify(options, null, 2));
+        
+        const builtInTools = this.getNodeParameter('builtInTools', itemIndex, {}) as IDataObject;
+        console.log('[DEBUG] Built-in tools:', JSON.stringify(builtInTools, null, 2));
 
         const configuration: ClientOptions = {};
 
@@ -639,13 +647,17 @@ export class LmChatOpenAiLangfuse implements INodeType {
         // Extra options to send to OpenAI, that are not directly supported by LangChain
         const modelKwargs: Record<string, unknown> = {};
         if (responsesApiEnabled) {
+            console.log('[DEBUG] Responses API ENABLED - preparing additional params');
             const kwargs = prepareAdditionalResponsesParams(options);
+            console.log('[DEBUG] Additional kwargs:', JSON.stringify(kwargs, null, 2));
             Object.assign(modelKwargs, kwargs);
         } else {
+            console.log('[DEBUG] Responses API DISABLED - using standard mode');
             if (options.responseFormat) modelKwargs.response_format = { type: options.responseFormat };
             if (options.reasoningEffort && ['low', 'medium', 'high'].includes(options.reasoningEffort))
                 modelKwargs.reasoning_effort = options.reasoningEffort;
         }
+        console.log('[DEBUG] Final modelKwargs:', JSON.stringify(modelKwargs, null, 2));
 
         const includedOptions = pick(options, [
             'frequencyPenalty',
@@ -669,20 +681,36 @@ export class LmChatOpenAiLangfuse implements INodeType {
         } as any;
 
         if (responsesApiEnabled) {
+            console.log('[DEBUG] Setting useResponsesApi=true in fields');
             fields.useResponsesApi = true;
         }
+        
+        console.log('[DEBUG] ChatOpenAI fields (without apiKey):', JSON.stringify({
+            model: fields.model,
+            timeout: fields.timeout,
+            maxRetries: fields.maxRetries,
+            useResponsesApi: fields.useResponsesApi,
+            metadata: fields.metadata,
+            modelKwargs: fields.modelKwargs,
+        }, null, 2));
 
         const model = new ChatOpenAI(fields);
 
         if (responsesApiEnabled) {
+            console.log('[DEBUG] Formatting built-in tools...');
             const tools = formatBuiltInTools(
                 this.getNodeParameter('builtInTools', itemIndex, {}) as IDataObject,
             );
+            console.log('[DEBUG] Formatted tools:', JSON.stringify(tools, null, 2));
             if (tools.length) {
+                console.log('[DEBUG] Adding', tools.length, 'tools to model metadata');
                 model.metadata = {
                     ...model.metadata,
                     tools,
                 };
+                console.log('[DEBUG] Final model.metadata:', JSON.stringify(model.metadata, null, 2));
+            } else {
+                console.log('[DEBUG] No tools to add (tools array is empty)');
             }
         }
 
