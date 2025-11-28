@@ -7,9 +7,9 @@ import {
     type SupplyData,
 } from 'n8n-workflow';
 
-import { CallbackHandler } from 'langfuse-langchain';
 import { searchModels } from './methods/loadModels';
-import { N8nLlmTracing } from './utils/N8nLlmTracing'
+import { N8nLlmTracing } from './utils/N8nLlmTracing';
+import { LangfuseCallbackHandlerWrapper } from './utils/LangfuseCallbackHandlerWrapper';
 
 
 export class LmChatOpenAiLangfuse implements INodeType {
@@ -389,8 +389,8 @@ export class LmChatOpenAiLangfuse implements INodeType {
             customMetadata = customMetadataRaw as Record<string, any>;
         }
 
-        // langfuse handler
-        const lfHandler = new CallbackHandler({
+        // langfuse handler with estimatedTokenUsage support
+        const lfHandler = new LangfuseCallbackHandlerWrapper({
             baseUrl: credentials.langfuseBaseUrl as string,
             publicKey: credentials.langfusePublicKey as string,
             secretKey: credentials.langfuseSecretKey as string,
