@@ -8,12 +8,14 @@ import {
     type ISupplyDataFunctions,
     type SupplyData,
 } from 'n8n-workflow';
+import { NodeSDK } from '@opentelemetry/sdk-node';
+import { LangfuseSpanProcessor } from '@langfuse/otel';
+import { CallbackHandler } from '@langfuse/langchain';
 
 import { formatBuiltInTools, prepareAdditionalResponsesParams } from './common';
 import { searchModels } from './methods/loadModels';
 import type { ModelOptions } from './types';
 import { N8nLlmTracing } from './utils/N8nLlmTracing';
-import { LangfuseCallbackHandlerWrapper } from './utils/LangfuseCallbackHandlerWrapper';
 
 
 export class LmChatOpenAiLangfuse implements INodeType {
@@ -79,31 +81,51 @@ export class LmChatOpenAiLangfuse implements INodeType {
                 default: {},
                 options: [
                     {
-                        displayName: 'Custom Metadata (JSON)',
-                        name: 'customMetadata',
+                        displayName: 'Metadata (JSON)',
+                        name: 'metadata',
                         type: 'json',
-                        default: `{
-    "project": "example-project",
-    "env": "dev",
-    "workflow": "main-flow"
-}`,
-                        description: "Optional. Pass extra metadata to be attached to Langfuse traces."
-                        ,
+                        default: '{}',
+                        description: 'Additional metadata as JSON object',
+                    },
+                    {
+                        displayName: 'Prompt Name',
+                        name: 'promptName',
+                        type: 'string',
+                        default: '',
+                        placeholder: 'my-prompt',
+                        description: 'Name of the Langfuse prompt to link to this generation. Leave empty to not link a prompt.',
+                    },
+                    {
+                        displayName: 'Prompt Version',
+                        name: 'promptVersion',
+                        type: 'number',
+                        default: 0,
+                        description: 'Specific version of the prompt. Leave as 0 to use latest version.',
                     },
                     {
                         displayName: 'Session ID',
                         name: 'sessionId',
                         type: 'string',
-                        default: 'default-session-id',
-                        description: 'Used in Langfuse trace grouping (langfuse_session_id)',
+                        default: '',
+                        placeholder: 'user-session-123',
+                        description: 'Session ID for grouping related traces',
+                    },
+                    {
+                        displayName: 'Tags',
+                        name: 'tags',
+                        type: 'string',
+                        default: '',
+                        placeholder: 'production,experiment-a',
+                        description: 'Comma-separated list of tags for filtering traces',
                     },
                     {
                         displayName: 'User ID',
                         name: 'userId',
                         type: 'string',
                         default: '',
-                        description: 'Optional: for trace attribution (langfuse_user_id)',
-                    }
+                        placeholder: 'user-456',
+                        description: 'User ID for trace attribution',
+                    },
                 ],
             },
             // Model
@@ -582,41 +604,76 @@ export class LmChatOpenAiLangfuse implements INodeType {
     async supplyData(this: ISupplyDataFunctions, itemIndex: number): Promise<SupplyData> {
         const credentials = await this.getCredentials('openAiApiWithLangfuseApi');
 
-        const {
-            sessionId,
-            userId,
-            customMetadata: customMetadataRaw = {},
-        } = this.getNodeParameter('langfuseMetadata', itemIndex) as {
-            sessionId: string;
+        // Get Langfuse options (support both new and old field names for backward compatibility)
+        const langfuseOptions = this.getNodeParameter('langfuseMetadata', itemIndex, {}) as {
+            promptName?: string;
+            promptVersion?: number;
+            sessionId?: string;
             userId?: string;
-            customMetadata?: string | Record<string, any>;
+            tags?: string;
+            metadata?: string;
+            customMetadata?: string | Record<string, any>; // OLD field name for backward compatibility
         };
 
-        let customMetadata: Record<string, any> = {};
-
-
-        if (typeof customMetadataRaw === 'string') {
-            try {
-                customMetadata = customMetadataRaw.trim()
-                    ? jsonParse<Record<string, any>>(customMetadataRaw)
-                    : {};
-            } catch {
-                customMetadata = { _raw: customMetadataRaw }; // fallback
+        const sessionId = langfuseOptions.sessionId || '';
+        const userId = langfuseOptions.userId || '';
+        const tagsString = langfuseOptions.tags || '';
+        const tags = tagsString ? tagsString.split(',').map(t => t.trim()).filter(Boolean) : [];
+        
+        // Parse metadata - support both 'metadata' (new) and 'customMetadata' (old)
+        let metadata: Record<string, any> = {};
+        const metadataSource = langfuseOptions.metadata || langfuseOptions.customMetadata;
+        
+        if (metadataSource) {
+            if (typeof metadataSource === 'string') {
+                try {
+                    metadata = metadataSource.trim() ? jsonParse<Record<string, any>>(metadataSource) : {};
+                } catch (e) {
+                    console.log('[Langfuse v4] Failed to parse metadata JSON:', e);
+                    metadata = { _raw: metadataSource };
+                }
+            } else if (typeof metadataSource === 'object') {
+                metadata = metadataSource as Record<string, any>;
             }
-        } else if (customMetadataRaw && typeof customMetadataRaw === 'object') {
-            customMetadata = customMetadataRaw as Record<string, any>;
         }
 
-        // langfuse handler with estimatedTokenUsage support
-        const lfHandler = new LangfuseCallbackHandlerWrapper({
-            baseUrl: credentials.langfuseBaseUrl as string,
+        console.log('[Langfuse v4] Options:', { sessionId, userId, tags, metadata });
+        
+        // Extract langfusePrompt from metadata if present (for prompt linking)
+        let langfusePromptData: any = undefined;
+        if (metadata.langfusePrompt) {
+            langfusePromptData = metadata.langfusePrompt;
+            console.log('[Langfuse v4] Found langfusePrompt in metadata for linking:', JSON.stringify(langfusePromptData).substring(0, 200));
+        }
+
+
+        // Initialize OpenTelemetry SDK with Langfuse span processor
+        const langfuseSpanProcessor = new LangfuseSpanProcessor({
             publicKey: credentials.langfusePublicKey as string,
             secretKey: credentials.langfuseSecretKey as string,
-            sessionId,
-            userId,
+            baseUrl: credentials.langfuseBaseUrl as string,
+            exportMode: 'immediate', // Critical: Ensures traces are sent immediately in n8n
         });
 
-        console.log('[Langfuse] CallbackHandler created with session:', sessionId, 'user:', userId, 'metadata:', customMetadata);
+        const sdk = new NodeSDK({
+            spanProcessors: [langfuseSpanProcessor],
+        });
+        
+        // Start the SDK (idempotent - safe to call multiple times)
+        sdk.start();
+
+        // Create Langfuse v4 CallbackHandler with context
+        // CRITICAL: sessionId, userId, and tags MUST be passed to CallbackHandler constructor
+        // for sessions to be created and traces to be grouped correctly in Langfuse
+        const lfHandler = new CallbackHandler({
+            sessionId: sessionId || undefined,
+            userId: userId || undefined,
+            tags: tags.length > 0 ? tags : undefined,
+        });
+
+        console.log('[Langfuse v4] OpenTelemetry SDK initialized with LangfuseSpanProcessor');
+        console.log('[Langfuse v4] CallbackHandler created with context:', { sessionId, userId, tags });
+        console.log('[Langfuse v4] Context passed to CallbackHandler constructor for session creation');
 
         const version = this.getNode().typeVersion;
         console.log('[DEBUG] Node version:', version);
@@ -668,6 +725,32 @@ export class LmChatOpenAiLangfuse implements INodeType {
             'baseURL',
         ]);
 
+        // Prepare metadata for ChatOpenAI
+        // In Langfuse v4 with OTEL, metadata becomes span attributes
+        const chatOpenAIMetadata: Record<string, any> = { ...metadata };
+        
+        // Add Langfuse-specific attributes for trace grouping
+        if (sessionId) {
+            chatOpenAIMetadata['session.id'] = sessionId; // OTEL convention
+            chatOpenAIMetadata.sessionId = sessionId; // Langfuse convention
+        }
+        if (userId) {
+            chatOpenAIMetadata['user.id'] = userId; // OTEL convention  
+            chatOpenAIMetadata.userId = userId; // Langfuse convention
+        }
+        if (tags.length > 0) {
+            chatOpenAIMetadata['langfuse.trace.tags'] = tags; // Langfuse convention
+            chatOpenAIMetadata.tags = tags.join(','); // For display
+        }
+        
+        console.log('[Langfuse v4] ChatOpenAI metadata (will become OTEL attributes):', JSON.stringify(chatOpenAIMetadata, null, 2));
+        
+        // Add langfusePrompt to metadata for prompt linking
+        if (langfusePromptData) {
+            chatOpenAIMetadata.langfusePrompt = langfusePromptData;
+            console.log('[Langfuse v4] Added langfusePrompt to ChatOpenAI metadata for linking');
+        }
+
         const fields = {
             apiKey: credentials.apiKey as string,
             model: modelName,
@@ -676,7 +759,7 @@ export class LmChatOpenAiLangfuse implements INodeType {
             maxRetries: options.maxRetries ?? 2,
             configuration,
             callbacks: [lfHandler, new N8nLlmTracing(this)],
-            metadata: customMetadata,
+            metadata: chatOpenAIMetadata,
             modelKwargs,
         } as any;
 
