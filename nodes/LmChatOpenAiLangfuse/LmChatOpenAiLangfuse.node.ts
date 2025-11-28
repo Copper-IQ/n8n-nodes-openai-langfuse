@@ -681,8 +681,9 @@ export class LmChatOpenAiLangfuse implements INodeType {
         } as any;
 
         if (responsesApiEnabled) {
-            console.log('[DEBUG] Setting useResponsesApi=true in fields');
+            console.log('[DEBUG] Setting useResponsesApi=true and output_version=responses/v1 in fields');
             fields.useResponsesApi = true;
+            fields.outputVersion = 'responses/v1';
         }
         
         console.log('[DEBUG] ChatOpenAI fields (without apiKey):', JSON.stringify({
