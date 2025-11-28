@@ -695,9 +695,9 @@ export class LmChatOpenAiLangfuse implements INodeType {
             modelKwargs: fields.modelKwargs,
         }, null, 2));
 
-		let model = new ChatOpenAI(fields);
+		const model = new ChatOpenAI(fields);
 
-		// Bind built-in tools if Responses API is enabled
+		// Pass built-in tools in metadata for Agent v3 to merge
 		if (responsesApiEnabled) {
 			console.log('[DEBUG] Formatting built-in tools...');
 			const tools = formatBuiltInTools(
@@ -705,16 +705,18 @@ export class LmChatOpenAiLangfuse implements INodeType {
 			);
 			console.log('[DEBUG] Formatted tools:', JSON.stringify(tools, null, 2));
 			if (tools.length) {
-				console.log('[DEBUG] Binding', tools.length, 'tools using bindTools()');
-				model = model.bindTools(tools) as ChatOpenAI;
-				console.log('[DEBUG] Tools successfully bound to model');
+				console.log('[DEBUG] Adding', tools.length, 'tools to model.metadata');
+				model.metadata = {
+					...model.metadata,
+					tools,
+				};
+				console.log('[DEBUG] model.metadata.tools set:', JSON.stringify(model.metadata.tools, null, 2));
 			} else {
-				console.log('[DEBUG] No tools to bind (tools array is empty)');
+				console.log('[DEBUG] No tools to add (tools array is empty)');
 			}
 		} else {
 			console.log('[DEBUG] Responses API disabled, skipping tools');
 		}
-		console.log('[DEBUG] FINAL CHECK - model.metadata.tools:', JSON.stringify(model.metadata?.tools, null, 2));
 
         return {
             response: model,
