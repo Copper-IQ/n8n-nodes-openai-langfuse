@@ -668,6 +668,23 @@ export class LmChatOpenAiLangfuse implements INodeType {
             'baseURL',
         ]);
 
+        // Prepare metadata with tools BEFORE creating the model
+        const metadata = { ...customMetadata };
+        
+        if (responsesApiEnabled) {
+            console.log('[DEBUG] Formatting built-in tools...');
+            const tools = formatBuiltInTools(
+                this.getNodeParameter('builtInTools', itemIndex, {}) as IDataObject,
+            );
+            console.log('[DEBUG] Formatted tools:', JSON.stringify(tools, null, 2));
+            if (tools.length) {
+                console.log('[DEBUG] Adding', tools.length, 'tools to metadata BEFORE model creation');
+                metadata.tools = tools;
+            } else {
+                console.log('[DEBUG] No tools to add (tools array is empty)');
+            }
+        }
+
         const fields = {
             apiKey: credentials.apiKey as string,
             model: modelName,
@@ -676,7 +693,7 @@ export class LmChatOpenAiLangfuse implements INodeType {
             maxRetries: options.maxRetries ?? 2,
             configuration,
             callbacks: [lfHandler, new N8nLlmTracing(this)],
-            metadata: customMetadata,
+            metadata,
             modelKwargs,
         } as any;
 
@@ -695,24 +712,6 @@ export class LmChatOpenAiLangfuse implements INodeType {
         }, null, 2));
 
         const model = new ChatOpenAI(fields);
-
-        if (responsesApiEnabled) {
-            console.log('[DEBUG] Formatting built-in tools...');
-            const tools = formatBuiltInTools(
-                this.getNodeParameter('builtInTools', itemIndex, {}) as IDataObject,
-            );
-            console.log('[DEBUG] Formatted tools:', JSON.stringify(tools, null, 2));
-            if (tools.length) {
-                console.log('[DEBUG] Adding', tools.length, 'tools to model metadata');
-                model.metadata = {
-                    ...model.metadata,
-                    tools,
-                };
-                console.log('[DEBUG] Final model.metadata:', JSON.stringify(model.metadata, null, 2));
-            } else {
-                console.log('[DEBUG] No tools to add (tools array is empty)');
-            }
-        }
 
         return {
             response: model,
