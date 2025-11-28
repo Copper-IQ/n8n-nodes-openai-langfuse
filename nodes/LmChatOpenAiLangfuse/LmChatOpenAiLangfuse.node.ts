@@ -695,23 +695,27 @@ export class LmChatOpenAiLangfuse implements INodeType {
             modelKwargs: fields.modelKwargs,
         }, null, 2));
 
-        let model = new ChatOpenAI(fields);
+		const model = new ChatOpenAI(fields);
 
-        // Bind built-in tools if Responses API is enabled
-        if (responsesApiEnabled) {
-            console.log('[DEBUG] Formatting built-in tools...');
-            const tools = formatBuiltInTools(
-                this.getNodeParameter('builtInTools', itemIndex, {}) as IDataObject,
-            );
-            console.log('[DEBUG] Formatted tools:', JSON.stringify(tools, null, 2));
-            if (tools.length) {
-                console.log('[DEBUG] Binding', tools.length, 'tools to model using bindTools()');
-                model = model.bindTools(tools) as ChatOpenAI;
-                console.log('[DEBUG] Model successfully bound with tools');
-            } else {
-                console.log('[DEBUG] No tools to bind (tools array is empty)');
-            }
-        }
+		// Pass built-in tools in metadata for ToolAgent to configure
+		if (responsesApiEnabled) {
+			console.log('[DEBUG] Formatting built-in tools...');
+			const tools = formatBuiltInTools(
+				this.getNodeParameter('builtInTools', itemIndex, {}) as IDataObject,
+			);
+			console.log('[DEBUG] Formatted tools:', JSON.stringify(tools, null, 2));
+			// pass tools to the model metadata, ToolAgent will use it to create agent configuration
+			if (tools.length) {
+				console.log('[DEBUG] Setting', tools.length, 'tools in model.metadata');
+				model.metadata = {
+					...model.metadata,
+					tools,
+				};
+				console.log('[DEBUG] Model metadata now includes tools');
+			} else {
+				console.log('[DEBUG] No tools to add (tools array is empty)');
+			}
+		}
 
         return {
             response: model,
